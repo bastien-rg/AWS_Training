@@ -1,68 +1,102 @@
 import traceback
 import boto3
 import psycopg2
+import asyncio
+import logging
 from nicegui import ui
  
-DB_HOST = 'sandbox-auroradb-instance-1.cnsksca2iibu.ap-northeast-1.rds.amazonaws.com'
+DB_HOST = "aurora-sandbox.cluster-cnsksca2iibu.ap-northeast-1.rds.amazonaws.com"
 DB_PORT = 5432
 DB_NAME = 'postgres'
 DB_USER = 'myaurora'
 AWS_REGION = 'ap-northeast-1'
 SSL_CERT = './global-bundle.pem'
 
+class LogElementHandler(logging.Handler):
+    """A logging handler that emits messages to a log element."""
 
+    def __init__(self, element: ui.log, level: int = logging.NOTSET) -> None:
+        self.element = element
+        super().__init__(level)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            self.element.push(msg, classes="text-grey")
+        except Exception:
+            self.handleError(record)
 
 @ui.page("/")
 def main_page():
-    # Client variable
-    connection_result = { "status": ""}
+    # User env
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+
+    # Layout
+    with ui.card().classes("w-full"):
+        with ui.grid(columns=12).classes("w-full"):
+            connect_btn = ui.button("Connect").classes("col-span-full")
+            log_box = ui.log(max_lines=20).classes("col-span-full")
+
+    # Post-layout setup        
+    log_handler = LogElementHandler(log_box)
+    logger.addHandler(log_handler)
 
     # Functions
-    def try_connect():
+    async def try_connect():
         """
         Attempt Aurora connection. Returns (success, message).
         Fargate needs to be launched with IAM role that allows IAM authentication to Aurora.
         Doing so, AWS will setup the env variable AWS_CONTAINER_CREDENTIALS_RELATIVE_URI that
         boto3 will use to fetch a 15-min utilizable auth token.
         """
-        print("Connecting to Aurora...")
-        conn = None
-        try:
-            auth_token = boto3.client('rds', region_name=AWS_REGION).generate_db_auth_token(
-                DBHostname=DB_HOST,
-                Port=DB_PORT,
-                DBUsername=DB_USER,
-                Region=AWS_REGION,
-            )
-            conn = psycopg2.connect(
-                host=DB_HOST,
-                port=DB_PORT,
-                database=DB_NAME,
-                user=DB_USER,
-                password=auth_token,
-                sslmode='verify-full',
-                sslrootcert=SSL_CERT,
-            )
-            conn.autocommit = True
-            cur = conn.cursor()
-            cur.execute('SELECT version();')
-            version = cur.fetchone()[0]
-            cur.close()
-            print(f"Success, version={version}")
+        connect_btn.disable()
+        def blocking_connect() -> tuple[bool, str]:
+            conn = None
+            try:
+                auth_token = boto3.client('rds', region_name=AWS_REGION).generate_db_auth_token(
+                    DBHostname=DB_HOST,
+                    Port=DB_PORT,
+                    DBUsername=DB_USER,
+                    Region=AWS_REGION,
+                )
+                log_box.push("Connecting with obtained token (timeout=60s)", classes="text-orange")
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=auth_token,
+                    sslmode='verify-full',
+                    sslrootcert=SSL_CERT,
+                )
+                conn.autocommit = True
+                cur = conn.cursor()
+                cur.execute('SELECT version();')
+                version = cur.fetchone()[0]
+                cur.close()
+                print(f"Success, version={version}")
 
-            connection_result["status"] = version
-        except Exception:
-            stack = traceback.format_exc()
-            print(f"Error! {stack}")
-            connection_result["status"] = stack
-        finally:
-            if conn:
-                conn.close()
+                return True, version
+            
+            except Exception:
+                stack = traceback.format_exc()
+                print(f"Error! {stack}")
+                return False, stack
+            finally:
+                if conn:
+                    conn.close()
+        
+        status, msg = await asyncio.get_event_loop().run_in_executor(None, blocking_connect)
+        if status:
+            log_box.push("Connected!", classes="text-green")
+        else:
+            logger.push("Connection failed", classes="text-red")
+        connect_btn.enable()
 
-    # Layout
-    with ui.card():
-        ui.button("Connect", on_click=try_connect)
-        ui.label().bind_text_from(connection_result, "status")
+    # Post function definition setup
+    connect_btn.on_click(try_connect)
+    ui.context.client.on_disconnect(lambda: logger.removeHandler(log_handler))
 
 
 # NiceGUI start
