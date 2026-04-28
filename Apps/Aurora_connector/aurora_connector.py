@@ -12,6 +12,8 @@ DB_USER = 'myaurora'
 AWS_REGION = 'ap-northeast-1'
 SSL_CERT = './global-bundle.pem'
 
+from nicegui import ui
+
 class LogElementHandler(logging.Handler):
     """A logging handler that emits messages to a log element."""
 
@@ -22,7 +24,7 @@ class LogElementHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            self.element.push(msg, classes="text-grey")
+            self.element.push(msg)
         except Exception:
             self.handleError(record)
 
@@ -35,8 +37,8 @@ def main_page():
     # Layout
     with ui.card().classes("w-full"):
         with ui.grid(columns=12).classes("w-full"):
-            connect_btn = ui.button("Connect").classes("col-span-full")
-            log_box = ui.log(max_lines=20).classes("col-span-full")
+            connect_btn = ui.button("Connect to Aurora").classes("col-span-full")
+            log_box = ui.log(max_lines=50).classes("col-span-full bg-gray-700 text-white").style("font-size: 10px")
 
     # Post-layout setup        
     log_handler = LogElementHandler(log_box)
@@ -91,13 +93,25 @@ def main_page():
         if status:
             log_box.push("Connected!", classes="text-green")
         else:
-            logger.push("Connection failed", classes="text-red")
+            log_box.push("Connection failed", classes="text-red")
         connect_btn.enable()
 
     # Post function definition setup
     connect_btn.on_click(try_connect)
     ui.context.client.on_disconnect(lambda: logger.removeHandler(log_handler))
 
+    # CSS
+    ui.dark_mode().enable()
+    ui.colors(
+        primary="#1f3a5f",
+        secondary="#2b6cb0",
+        accent="#4dabf7", 
+
+        positive="#4caf50",
+        warning="#ff9800",
+        negative="#f44336",
+        info="#29b6f6", 
+    )
 
 # NiceGUI start
 ui.run(title="Aurora sandbox", port=8765)
