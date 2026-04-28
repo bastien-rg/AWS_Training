@@ -4,7 +4,9 @@ import psycopg2
 import asyncio
 import logging
 from nicegui import ui
- 
+
+APP_VERSION="v0.4"
+
 DB_HOST = "aurora-sandbox.cluster-cnsksca2iibu.ap-northeast-1.rds.amazonaws.com"
 DB_PORT = 5432
 DB_NAME = 'postgres'
@@ -37,6 +39,11 @@ def main_page():
     # Layout
     with ui.card().classes("w-full"):
         with ui.grid(columns=12).classes("w-full"):
+            # Title block
+            with ui.column().classes("col-span-full gap-0"):
+                ui.label("Aurora Experiment Dashboard").classes("text-xl font-semibold")
+                ui.label(APP_VERSION).classes("text-sm text-gray-400")
+
             connect_btn = ui.button("Connect to Aurora").classes("col-span-full")
             log_box = ui.log(max_lines=50).classes("col-span-full bg-gray-700 text-white").style("font-size: 10px")
 
@@ -91,7 +98,7 @@ def main_page():
         
         status, msg = await asyncio.get_event_loop().run_in_executor(None, blocking_connect)
         if status:
-            log_box.push("Connected!", classes="text-green")
+            log_box.push("Connected! "+msg, classes="text-green")
         else:
             log_box.push("Connection failed", classes="text-red")
         connect_btn.enable()
@@ -114,5 +121,4 @@ def main_page():
     )
 
 # NiceGUI start
-ui.run(title="Aurora sandbox", port=8765)
-# ui.run(title="Aurora sandbox", host="0.0.0.0", port=8765, reload=False)
+ui.run(title="Aurora sandbox", host="0.0.0.0", port=8765)
