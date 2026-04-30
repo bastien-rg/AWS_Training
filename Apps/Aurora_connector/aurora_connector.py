@@ -5,13 +5,14 @@ import asyncio
 import logging
 from nicegui import ui
 
-APP_VERSION="v0.4"
+APP_VERSION="v0.5"
 
-DB_HOST = "aurora-sandbox.cluster-cnsksca2iibu.ap-northeast-1.rds.amazonaws.com"
+DB_IDENTIFIERS = ["aurora-sandbox.cluster-cnsksca2iibu", "aurora-sandbox-instance-1.cnsksca2iibu", "aurora-sandbox-reader1.cnsksca2iibu" ]
+
+AWS_REGION = 'ap-northeast-1'
 DB_PORT = 5432
 DB_NAME = 'postgres'
 DB_USER = 'myaurora'
-AWS_REGION = 'ap-northeast-1'
 SSL_CERT = './global-bundle.pem'
 
 from nicegui import ui
@@ -35,6 +36,7 @@ def main_page():
     # User env
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
+    DB_CONN = None
 
     # Layout
     with ui.card().classes("w-full"):
@@ -44,7 +46,9 @@ def main_page():
                 ui.label("Aurora Experiment Dashboard").classes("text-xl font-semibold")
                 ui.label(APP_VERSION).classes("text-sm text-gray-400")
 
-            connect_btn = ui.button("Connect to Aurora").classes("col-span-full")
+            connect_btn = ui.button("Connect to Aurora").classes("col-span-4")
+            disconnect_btn = ui.button("Disconnect").classes("col-span-4")
+            db_identifier_select = ui.select(options=DB_IDENTIFIERS, label="DB identifier", value=DB_IDENTIFIERS[0]).classes("col-span-4")
             log_box = ui.log(max_lines=50).classes("col-span-full bg-gray-700 text-white").style("font-size: 10px")
 
     # Post-layout setup        
@@ -52,6 +56,9 @@ def main_page():
     logger.addHandler(log_handler)
 
     # Functions
+    def get_db_host():
+        return db_identifier_select.value + "." + AWS_REGION + ".rds.amazonaws.com"
+
     async def try_connect():
         """
         Attempt Aurora connection. Returns (success, message).
@@ -59,9 +66,10 @@ def main_page():
         Doing so, AWS will setup the env variable AWS_CONTAINER_CREDENTIALS_RELATIVE_URI that
         boto3 will use to fetch a 15-min utilizable auth token.
         """
-        connect_btn.disable()
+        nonlocal DB_CONN
         def blocking_connect() -> tuple[bool, str]:
-            conn = None
+            DB_HOST = get_db_host()
+            print(f"DB HOST IS {DB_HOST}")
             try:
                 auth_token = boto3.client('rds', region_name=AWS_REGION).generate_db_auth_token(
                     DBHostname=DB_HOST,
@@ -86,25 +94,35 @@ def main_page():
                 cur.close()
                 print(f"Success, version={version}")
 
-                return True, version
+                return True, version, conn
             
             except Exception:
                 stack = traceback.format_exc()
                 print(f"Error! {stack}")
-                return False, stack
-            finally:
-                if conn:
-                    conn.close()
+                return False, stack, None
         
-        status, msg = await asyncio.get_event_loop().run_in_executor(None, blocking_connect)
+        status, msg, conn = await asyncio.get_event_loop().run_in_executor(None, blocking_connect)
         if status:
             log_box.push("Connected! "+msg, classes="text-green")
+            DB_CONN = conn
+            connect_btn.disable()
+            disconnect_btn.enable()
         else:
             log_box.push("Connection failed", classes="text-red")
-        connect_btn.enable()
+            connect_btn.enable()
+
+    def disconnect_db():
+        nonlocal DB_CONN
+        if DB_CONN:
+            DB_CONN.close()
+            DB_CONN = None
+            disconnect_btn.disable()
+            connect_btn.enable()
 
     # Post function definition setup
     connect_btn.on_click(try_connect)
+    disconnect_btn.on_click(disconnect_db)
+    disconnect_btn.disable()
     ui.context.client.on_disconnect(lambda: logger.removeHandler(log_handler))
 
     # CSS
